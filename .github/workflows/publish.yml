@@ -15,28 +15,28 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            artifact_name: aspmenabler-x86_64
+            arch: x86_64
           - os: ubuntu-24.04-arm
-            artifact_name: aspmenabler-arm64
+            arch: arm64
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Compile
-        run: gcc -O2 -flto -Wall -Wextra aspmenabler.c -o aspmenabler
+        run: gcc -O2 -flto -Wall -Wextra aspmenabler.c -o aspmenabler-${{ matrix.arch }}
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: aspmenabler
+          name: aspmenabler-${{ matrix.arch }}
+          path: aspmenabler-${{ matrix.arch }}
 
   release:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download Artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -45,5 +45,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/aspmenabler-x86_64/aspmenabler
-            artifacts/aspmenabler-arm64/aspmenabler
+            artifacts/aspmenabler-x86_64/aspmenabler-x86_64
+            artifacts/aspmenabler-arm64/aspmenabler-arm64
