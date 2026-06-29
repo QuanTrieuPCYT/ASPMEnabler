@@ -28,6 +28,8 @@ typedef struct {
     size_t cap;
 } DeviceList;
 
+static int silent = 0;
+
 static const char *aspm_name(ASPM mode) {
     switch (mode) {
         case ASPM_DISABLED: return "DISABLED";
@@ -273,9 +275,9 @@ static void patch_device(const char *addr, ASPM aspm_value) {
         patched |= (uint8_t)aspm_value;
 
         patch_byte(addr, byte_position_to_patch, patched);
-        printf("%s: Enabled ASPM %s\n", addr, aspm_name(aspm_value));
+        if (!silent) printf("%s: Enabled ASPM %s\n", addr, aspm_name(aspm_value));
     } else {
-        printf("%s: Already has ASPM %s enabled\n", addr, aspm_name(aspm_value));
+        if (!silent) printf("%s: Already has ASPM %s enabled\n", addr, aspm_name(aspm_value));
     }
 }
 
@@ -423,7 +425,17 @@ static DeviceList list_supported_devices(void) {
     return list;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-s") == 0 ||
+            strcmp(argv[i], "--silent") == 0) {
+            silent = 1;
+        } else {
+            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            return 1;
+        }
+    }
+
     run_prerequisites();
 
     DeviceList devices = list_supported_devices();
