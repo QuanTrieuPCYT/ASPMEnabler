@@ -30,6 +30,8 @@ typedef struct {
 
 static int silent = 0;
 static char device_filter[16] = {0};
+static int mode_override_enabled = 0;
+static ASPM mode_override = ASPM_DISABLED;
 
 static const char *aspm_name(ASPM mode) {
     switch (mode) {
@@ -39,6 +41,30 @@ static const char *aspm_name(ASPM mode) {
         case ASPM_L0SL1:    return "L0sL1";
         default:            return "UNKNOWN";
     }
+}
+
+static int parse_aspm_mode(const char *s, ASPM *mode_out) {
+    if (strcmp(s, "off") == 0) {
+        *mode_out = ASPM_DISABLED;
+        return 1;
+    }
+
+    if (strcmp(s, "l0s") == 0) {
+        *mode_out = ASPM_L0S;
+        return 1;
+    }
+
+    if (strcmp(s, "l1") == 0) {
+        *mode_out = ASPM_L1;
+        return 1;
+    }
+
+    if (strcmp(s, "l0sl1") == 0) {
+        *mode_out = ASPM_L0SL1;
+        return 1;
+    }
+
+    return 0;
 }
 
 static int command_ok(const char *cmd) {
@@ -313,9 +339,9 @@ static void patch_device(const char *addr, ASPM aspm_value) {
         patched |= (uint8_t)aspm_value;
 
         patch_byte(addr, byte_position_to_patch, patched);
-        if (!silent) printf("%s: Enabled ASPM %s\n", addr, aspm_name(aspm_value));
+        if (!silent) printf("%s: Set ASPM to %s\n", addr, aspm_name(aspm_value));
     } else {
-        if (!silent) printf("%s: Already has ASPM %s enabled\n", addr, aspm_name(aspm_value));
+        if (!silent) printf("%s: ASPM is already %s\n", addr, aspm_name(aspm_value));
     }
 }
 
@@ -515,6 +541,23 @@ int main(int argc, char **argv) {
             }
 
             snprintf(device_filter, sizeof(device_filter), "%s", argv[i]);
+        } else if (strcmp(argv[i], "-m") == 0 ||
+                   strcmp(argv[i], "--mode") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "%s requires an ASPM mode\n", argv[i]);
+                fprintf(stderr, "Available modes: off, l0s, l1, l0sl1\n");
+                return 1;
+            }
+
+            i++;
+
+            if (!parse_aspm_mode(argv[i], &mode_override)) {
+                fprintf(stderr, "Invalid ASPM mode: %s\n", argv[i]);
+                fprintf(stderr, "Available modes: off, l0s, l1, l0sl1\n");
+                return 1;
+            }
+
+            mode_override_enabled = 1;
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             return 1;
@@ -527,6 +570,10 @@ int main(int argc, char **argv) {
         ASPM mode;
 
         if (get_supported_mode_for_device(device_filter, &mode)) {
+            if (mode_override_enabled) {
+                mode = mode_override;
+            }
+
             patch_device(device_filter, mode);
         }
 
@@ -536,7 +583,13 @@ int main(int argc, char **argv) {
     DeviceList devices = list_supported_devices();
 
     for (size_t i = 0; i < devices.len; i++) {
-        patch_device(devices.items[i].addr, devices.items[i].mode);
+        ASPM mode = devices.items[i].mode;
+
+        if (mode_override_enabled) {
+            mode = mode_override;
+        }
+
+        patch_device(devices.items[i].addr, mode);
     }
 
     free(devices.items);
