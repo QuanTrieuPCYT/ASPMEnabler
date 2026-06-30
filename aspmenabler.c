@@ -124,7 +124,7 @@ static char *run_command_capture(const char *cmd, int *exit_status) {
     return out;
 }
 
-static int valid_pci_addr(const char *s) {
+static size_t pci_addr_prefix_len(const char *s) {
     const char *p = s;
 
     if (isxdigit((unsigned char)p[0]) &&
@@ -135,14 +135,40 @@ static int valid_pci_addr(const char *s) {
         p += 5;
     }
 
-    return isxdigit((unsigned char)p[0]) &&
-           isxdigit((unsigned char)p[1]) &&
-           p[2] == ':' &&
-           isxdigit((unsigned char)p[3]) &&
-           isxdigit((unsigned char)p[4]) &&
-           p[5] == '.' &&
-           isxdigit((unsigned char)p[6]) &&
-           p[7] == '\0';
+    if (isxdigit((unsigned char)p[0]) &&
+        isxdigit((unsigned char)p[1]) &&
+        p[2] == ':' &&
+        isxdigit((unsigned char)p[3]) &&
+        isxdigit((unsigned char)p[4]) &&
+        p[5] == '.' &&
+        isxdigit((unsigned char)p[6])) {
+        return (size_t)((p - s) + 7);
+    }
+
+    return 0;
+}
+
+static int valid_pci_addr(const char *s) {
+    size_t len = pci_addr_prefix_len(s);
+    return len != 0 && s[len] == '\0';
+}
+
+static int line_starts_with_pci_addr(const char *s, size_t *addr_len_out) {
+    size_t len = pci_addr_prefix_len(s);
+
+    if (len == 0) {
+        return 0;
+    }
+
+    if (s[len] != '\0' && !isspace((unsigned char)s[len])) {
+        return 0;
+    }
+
+    if (addr_len_out) {
+        *addr_len_out = len;
+    }
+
+    return 1;
 }
 
 static char *get_device_name(const char *addr) {
@@ -380,7 +406,8 @@ static DeviceList list_supported_devices(void) {
          line;
          line = strtok_r(NULL, "\n", &saveptr)) {
 
-        int starts_device = valid_pci_addr(line);
+        size_t addr_len = 0;
+        int starts_device = line_starts_with_pci_addr(line, &addr_len);
 
         if (starts_device) {
             if (current_addr[0] && block) {
@@ -390,7 +417,13 @@ static DeviceList list_supported_devices(void) {
                 }
             }
 
-            snprintf(current_addr, sizeof(current_addr), "%.7s", line);
+            if (addr_len >= sizeof(current_addr)) {
+                fprintf(stderr, "PCI address too long: %.*s\n", (int)addr_len, line);
+                current_addr[0] = '\0';
+            } else {
+                memcpy(current_addr, line, addr_len);
+                current_addr[addr_len] = '\0';
+            }
 
             block_len = 0;
             if (block) {
@@ -477,7 +510,7 @@ int main(int argc, char **argv) {
 
             if (!valid_pci_addr(argv[i])) {
                 fprintf(stderr, "Invalid PCI device address: %s\n", argv[i]);
-                fprintf(stderr, "Expected format like 02:00.0 or 0000:02:00.0 may be accepted by lspci, but this program expects short form\n");
+                fprintf(stderr, "Expected format like 02:00.0 or 0000:02:00.0\n");
                 return 1;
             }
 
