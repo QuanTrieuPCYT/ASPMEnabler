@@ -29,6 +29,7 @@ typedef struct {
 } DeviceList;
 
 static int silent = 0;
+static char device_filter[16] = {0};
 
 static const char *aspm_name(ASPM mode) {
     switch (mode) {
@@ -124,13 +125,24 @@ static char *run_command_capture(const char *cmd, int *exit_status) {
 }
 
 static int valid_pci_addr(const char *s) {
-    return isxdigit((unsigned char)s[0]) &&
-           isxdigit((unsigned char)s[1]) &&
-           s[2] == ':' &&
-           isxdigit((unsigned char)s[3]) &&
-           isxdigit((unsigned char)s[4]) &&
-           s[5] == '.' &&
-           isxdigit((unsigned char)s[6]);
+    const char *p = s;
+
+    if (isxdigit((unsigned char)p[0]) &&
+        isxdigit((unsigned char)p[1]) &&
+        isxdigit((unsigned char)p[2]) &&
+        isxdigit((unsigned char)p[3]) &&
+        p[4] == ':') {
+        p += 5;
+    }
+
+    return isxdigit((unsigned char)p[0]) &&
+           isxdigit((unsigned char)p[1]) &&
+           p[2] == ':' &&
+           isxdigit((unsigned char)p[3]) &&
+           isxdigit((unsigned char)p[4]) &&
+           p[5] == '.' &&
+           isxdigit((unsigned char)p[6]) &&
+           p[7] == '\0';
 }
 
 static char *get_device_name(const char *addr) {
@@ -425,11 +437,51 @@ static DeviceList list_supported_devices(void) {
     return list;
 }
 
+static int get_supported_mode_for_device(const char *addr, ASPM *mode_out) {
+    char cmd[128];
+
+    snprintf(cmd, sizeof(cmd), "lspci -s %s -vv", addr);
+
+    int status = 0;
+    char *out = run_command_capture(cmd, &status);
+
+    if (!out || status != 0 || out[0] == '\0') {
+        fprintf(stderr, "%s: failed to read PCI device information\n", addr);
+        free(out);
+        return 0;
+    }
+
+    int ok = extract_aspm_mode(out, mode_out);
+
+    if (!ok) {
+        fprintf(stderr, "%s: ASPM not supported or not detected\n", addr);
+    }
+
+    free(out);
+    return ok;
+}
+
 int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-s") == 0 ||
             strcmp(argv[i], "--silent") == 0) {
             silent = 1;
+        } else if (strcmp(argv[i], "-d") == 0 ||
+                   strcmp(argv[i], "--device") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "%s requires a PCI device address\n", argv[i]);
+                return 1;
+            }
+
+            i++;
+
+            if (!valid_pci_addr(argv[i])) {
+                fprintf(stderr, "Invalid PCI device address: %s\n", argv[i]);
+                fprintf(stderr, "Expected format like 02:00.0 or 0000:02:00.0 may be accepted by lspci, but this program expects short form\n");
+                return 1;
+            }
+
+            snprintf(device_filter, sizeof(device_filter), "%s", argv[i]);
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             return 1;
@@ -437,6 +489,16 @@ int main(int argc, char **argv) {
     }
 
     run_prerequisites();
+
+    if (device_filter[0]) {
+        ASPM mode;
+
+        if (get_supported_mode_for_device(device_filter, &mode)) {
+            patch_device(device_filter, mode);
+        }
+
+        return 0;
+    }
 
     DeviceList devices = list_supported_devices();
 
